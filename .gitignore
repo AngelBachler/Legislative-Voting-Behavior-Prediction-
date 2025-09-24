@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.ipynb_checkpoints/
+.env
+.DS_Store
+*.csv
+*.xlsx
+*.zip
+data/*/detalle.csv
+detalle_voto.csv
