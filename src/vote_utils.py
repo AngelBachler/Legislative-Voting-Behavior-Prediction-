@@ -33,7 +33,7 @@ def build_detalle_periodo(nombre_periodo: str):
 
     # Construir DataFrame completo de detalles de votaciones
     detalles_list = []
-    for year in tqdm(range(int(star_year), int(end_year) + 1)):
+    for year in tqdm(range(int(star_year), int(end_year))):
         try:
             logging.info(f"Procesando año: {year}")
             df_votaciones = get_votaciones(client, year)
