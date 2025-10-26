@@ -6,20 +6,9 @@ import pandas as pd
 from bs4 import BeautifulSoup
 from rapidfuzz import process, fuzz  
 from ollama import Client
-from .extraction_utils import fetch_html
+from .common_utils import fetch_html, normalize_string
 import re
 
-def normalize_string(s):
-    """
-    Normaliza un string para una mejor comparación (minúsculas, sin acentos, espacios).
-    Es vital para un 'fuzzy matching' preciso.
-    """
-    if not isinstance(s, str):
-        return ""
-    s = s.lower().strip()
-    s = ''.join(c for c in unicodedata.normalize('NFD', s)
-                if unicodedata.category(c) != 'Mn')
-    return s
 
 def find_best_match_bcn(nombre_query, lista_choices, threshold=70):
     """
@@ -77,64 +66,53 @@ def find_best_match_bcn(nombre_query, lista_choices, threshold=70):
 
 # --- 4. FUNCIONES DE OLLAMA ---
 
-def get_ollama_client(host='http://127.0.0.1:11434'):
-    """
-    Inicializa y prueba la conexión con el cliente de Ollama.
-
-    Args:
-        host (str, optional): La dirección del servidor de Ollama. 
-                                Por defecto 'http://127.0.0.1:11434'.
-
-    Returns:
-        ollama.Client: El objeto cliente si la conexión es exitosa.
-        None: Si la conexión falla.
-    """
-    try:
-        # 1. Crear el cliente
-        client = Client(host=host)
-        
-        # 2. Probar la conexión (ligero y rápido)
-        #    'client.list()' verifica que el servidor responde.
-        client.list() 
-        
-        logging.info(f"Cliente Ollama conectado exitosamente en {host}")
-        return client
-        
-    except Exception as e:
-        # 3. Manejar el error si Ollama no está corriendo
-        logging.error(f"ERROR: No se pudo conectar con el servidor de Ollama en {host}.")
-        logging.error(f"   Asegúrese de que Ollama esté en ejecución. Detalle: {e}")
-        return None
+# EN: src/bio_utils.py
+# (Reemplace su get_section_paragraphs con esta versión más robusta)
 
 def get_section_paragraphs(soup: BeautifulSoup, title_patterns: list) -> list:
     """
-    (ESTA ES LA FUNCIÓN CLAVE)
+    (VERSIÓN ROBUSTA)
     Busca div.box_contenidos con <h4> que coincidan con title_patterns (regex)
     y devuelve una lista de párrafos (texto limpio).
+    
+    Intenta buscar <p> tags. Si falla, busca el <div> siguiente.
     """
     if not isinstance(title_patterns, (list, tuple)):
         title_patterns = [title_patterns]
 
     paras = []
     try:
-        # 1. Selecciona los recuadros celestes 
-        for box in soup.select("div.box_contenidos"): 
-            # 2. Busca el título <h4>
-            h4 = box.find("h4") 
+        for box in soup.select("div.box_contenidos"):
+            h4 = box.find("h4")
             if not h4:
                 continue
             
             title = normalize_string(h4.get_text(" ", strip=True))
             
-            # 3. Compara el <h4> con nuestros patrones (ej. "Familia...")
             if any(re.search(p, title, flags=re.IGNORECASE) for p in title_patterns):
                 
-                # 4. Si coincide, extrae TODOS los <p> dentro de ese recuadro
-                for p in box.find_all("p"):
-                    t = p.get_text(" ", strip=True) 
-                    if t:
-                        paras.append(t)
-                break 
+                # Estrategia 1: Buscar todos los tags <p> (el caso ideal)
+                all_paragraphs = box.find_all("p")
+                
+                if all_paragraphs:
+                    for p in all_paragraphs:
+                        t = p.get_text(" ", strip=True) # Texto original para el LLM
+                        if t:
+                            paras.append(t)
+                
+                # Estrategia 2: Si no hay <p>, buscar el <div> que sigue al <h4>
+                else:
+                    content_div = h4.find_next_sibling("div")
+                    if content_div:
+                        t = content_div.get_text(" ", strip=True)
+                        if t:
+                            # Dividir por saltos de línea (heurística)
+                            paras.extend([line.strip() for line in t.split('\n') if line.strip()])
+
+                # Si encontramos párrafos (con cualquier estrategia), salimos
+                if paras:
+                    break 
+                        
     except Exception as e:
         logging.error(f"Error al parsear 'get_section_paragraphs': {e}")
     
@@ -205,17 +183,15 @@ def scrape_bcn_bio_data(url: str, periodos_validos: list) -> dict:
         "bio_texto_completo": ""
     }
 
-    status, html = fetch_html(url) # Obtiene el HTML
+    status, text, html = fetch_html(url) # Obtiene el HTML
     out["status"] = status
     if status != 200 or not html:
         return out 
 
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(text, "html.parser")
 
-    # ... (código para extraer distrito) ...
     out["distrito"] = _extract_district_from_trajectory(soup, periodos_validos)
 
-    # --- AQUÍ ES DONDE SE USA ---
     # Llama a 'get_section_paragraphs' para el primer recuadro
     fam_parrafos = get_section_paragraphs(
         soup, 

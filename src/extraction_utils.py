@@ -1,66 +1,12 @@
-from zeep import Client
 import pandas as pd
 from pandas import json_normalize
-import re
 import requests
 import time
 import logging
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+from .common_utils import safe_serialize, fetch_html
 
-def listar_ops(wsdl_url):
-    """
-    Lista las operaciones disponibles en un servicio SOAP dado su WSDL.
-    Útil para explorar endpoints de la Cámara de Diputados o del Senado.
-    """
-    c = Client(wsdl=wsdl_url)
-    for svc in c.wsdl.services.values():
-        for port in svc.ports.values():
-            binding = port.binding
-            for name, op in binding._operations.items():
-                args = []
-                if op.input and op.input.body and op.input.body.type:
-                    args = [elt[0] for elt in op.input.body.type.elements]  # nombres de parámetros
-                print(f"{name}({', '.join(args)})")
-
-def sanitize_filename(name):
-    """Limpia nombres de carpeta/archivo."""
-    if pd.isna(name) or str(name).strip() == "":
-        return "sin_periodo"
-    return re.sub(r"[^\w\-]+", "_", str(name)).strip("_")
-
-def safe_serialize(obj):
-    """
-    Serializa objetos Zeep o SOAP a estructuras Python básicas (dict, list, str, etc.)
-    para poder normalizarlos con pandas.json_normalize sin errores.
-    """
-    # tipos base
-    if obj is None or isinstance(obj, (str, int, float, bool)):
-        return obj
-    if isinstance(obj, list):
-        return [safe_serialize(x) for x in obj]
-    if isinstance(obj, dict):
-        return {k: safe_serialize(v) for k, v in obj.items()}
-
-    # intentar con zeep.helpers.serialize_object
-    try:
-        from zeep.helpers import serialize_object
-        ser = serialize_object(obj)
-        if ser is not None:
-            return safe_serialize(ser)  # recursivo por si hay anidaciones
-    except Exception:
-        pass
-
-    # objetos Zeep suelen tener __values__
-    vals = getattr(obj, "__values__", None)
-    if isinstance(vals, dict):
-        return {k: safe_serialize(v) for k, v in vals.items()}
-
-    # fallback genérico
-    try:
-        return {k: safe_serialize(v) for k, v in vars(obj).items()}
-    except Exception:
-        return obj
 
 def get_legislaturas(client):
     res = client.service.retornarPeriodosLegislativos()
@@ -80,10 +26,7 @@ def get_diputados(client, periodo_id):
     df_diputados = pd.concat([df_explode, df_diputados], axis=1)
     return df_diputados
 
-def fetch_html(url: str, params: dict = None):
-    r = requests.get(url, params=params, timeout=30)
-    r.raise_for_status()
-    return r.status_code, r.text, r.url
+
 
 def scrape_bcn_list(base_url, params, pagina_inicial=1, pagina_final=20):
     """
@@ -106,7 +49,7 @@ def scrape_bcn_list(base_url, params, pagina_inicial=1, pagina_final=20):
 
             try:
                 time.sleep(0.5) # Ser respetuosos con el servidor
-                text, url = fetch_html(base_url, params=params)
+                status, text, url = fetch_html(base_url, params=params)
 
                 soup = BeautifulSoup(text, "html.parser")
 
