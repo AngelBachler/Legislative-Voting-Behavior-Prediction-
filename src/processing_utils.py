@@ -4,9 +4,10 @@ import pandas as pd
 import logging
 from pathlib import Path
 from rapidfuzz import process, fuzz
-from typing import List, Dict, Any
 import numpy as np
 import re
+import ast
+from tqdm import tqdm
 
 # Importar nuestra función de normalización de texto
 try:
@@ -59,71 +60,351 @@ def load_all_bio_files(data_dir_raw: Path) -> pd.DataFrame:
 
 # --- 2. FUNCIONES DE ESTANDARIZACIÓN (NORMALIZACIÓN) ---
 
-MAPA_UNIVERSIDADES = {
-    "Universidad de Chile": ["u de chile", "universidad chile"],
-    "Pontificia Universidad Católica de Chile": ["puc", "universidad catolica", "catolica de chile"],
-    "Universidad de Concepción": ["u de concepcion", "udec"],
-    "Universidad de Santiago de Chile": ["usach", "universidad de santiago"],
+def extract_last_colegio(colegio_str: str) -> str | None:
+    """
+    Toma un string que representa una lista de colegios (del LLM)
+    y extrae el ÚLTIMO colegio de la lista (asumiendo egreso).
     
+    Input: "['Colegio A', 'Colegio B']"
+    Output: "Colegio B"
+    """
+    # 1. Manejar NaNs o valores que no sean string
+    if not isinstance(colegio_str, str):
+        return None  # Se convertirá en NaN
+
+    try:
+        # 2. Parsear de forma segura el string a una lista de Python
+        # ast.literal_eval es el método seguro para parsear
+        # estructuras de Python (listas, dicts) desde strings.
+        colegios_list = ast.literal_eval(colegio_str)
+        
+        # 3. Validar y extraer
+        if isinstance(colegios_list, list) and len(colegios_list) > 0:
+            # Retorna el último ítem, limpio de espacios
+            return str(colegios_list[-1]).strip()
+        else:
+            # Para listas vacías '[]'
+            return None
+            
+    except (ValueError, SyntaxError):
+        # Para strings malformados o que no son listas
+        logging.warning(f"Error al parsear string de colegio: {colegio_str}")
+        return None
+
+UNI_MAP = {
+    # Chilenas (Canónico: [variaciones normalizadas])
+    'Pontificia Universidad Católica de Chile': ['pontificia universidad catolica de chile', 'universidad catolica de chile', 'puc', 'universidad catolica', 'pontificia universidad catolica', 'pontificia universidad catolica de santiago', 'pontifica universidad catolica de chile'],
+    'Universidad de Chile': ['universidad de chile', 'u de chile', 'uchile', 'escuela de teatro de la universidad de chile'],
+    'Universidad de Santiago de Chile': ['universidad de santiago de chile', 'universidad de santiago', 'usach', 'universidad tecnica del estado', 'ute'],
+    'Universidad de Concepción': ['universidad de concepcion', 'udec'],
+    'Universidad Técnica Federico Santa María': ['universidad tecnica federico santa maria', 'utfsm', 'universidad federico santa maria'],
+    'Universidad Austral de Chile': ['universidad austral de chile', 'universidad austral de valdivia'],
+    'Universidad Adolfo Ibáñez': ['universidad adolfo ibanez', 'uai'],
+    'Universidad de Los Andes': ['universidad de los andes (chile)', 'universidad de los andes'],
+    'Universidad del Desarrollo': ['universidad del desarrollo', 'udd'],
+    'Universidad Diego Portales': ['universidad diego portales', 'udp'],
+    'Universidad Andrés Bello': ['universidad andres bello', 'unab', 'nacional andres bello'],
+    'Universidad Católica del Norte': ['universidad catolica del norte'],
+    'Universidad de La Frontera': ['universidad de la frontera', 'ufro'],
+    'Universidad de Valparaíso': ['universidad de valparaiso', 'uv'],
+    'Universidad de Artes, Ciencias y Comunicación (UNIACC)': ['universidad de artes y las ciencias sociales',
+                                                               'universidad de artes y ciencias de la comunicacion'],
+    # Institutos
+    'Universidad Tecnológica de Chile INACAP': ['inacap', 'instituto nacional de capacitacion', 'universidad tecnologica (inacap)', 'instituto profesional inacap', 'instituto inacap',
+                                                'universidad tecnológica'],
+    'Instituto Profesional Agrario Adolfo Matthei': ['instituto superior de agricultura adolfo matthei', 'instituto profesional agrario adolfo matthei'],
+    'Instituto Profesional Duoc UC': ['duoc uc'],
+    
+    # Extranjeras (Agrupadas)
+    'Universidad Extranjera': [
+        'universidad de california', 'georgetown', 'complutense de madrid', 'universidad de cuenca', 'universitat basel', 'universidad de bilbao-espana', 
+        'universita degli studi di milano', 'instituto tecnico de estocolmo', 'universidad nacional autonoma de mexico', 'escuela nacional de antropologia e historia de mexico', 
+        'universidad internacional de cataluna, espana', 'universidad de heidelberg', 'universidad mayor de san simon (umss)', 'madrid, espana', 
+        'cochabamba, bolivia', 'chicago, estados unidos', 'francia', 'malmo, suecia', 'zurich, suiza', 
+        'buenos aires, argentina', 'viena - hietzing, austria', 'washington dc, estados unidos'
+    ],
+    
+    # Ruido
+    'Desconocida': ['nombre universidad', 'icce santiago', 'nan', '']
 }
 
+# --- 2. LISTA CANÓNICA (Fallback para Fuzzy Match) ---
+# (Esta es TU lista de 'UNIVERSIDADES')
+UNIVERSIDADES_CANONICAS = [
+    "Pontificia Universidad Católica de Chile", "Universidad de Chile",
+    "Universidad de Santiago de Chile", "Universidad de Concepción",
+    "Universidad Católica de Valparaíso", "Universidad Adolfo Ibáñez",
+    "Universidad Técnica Federico Santa María", "Universidad de Valparaíso",
+    "Universidad Tecnológica de Chile INACAP", "Universidad de Los Andes",
+    "Universidad del Desarrollo", "Universidad Alberto Hurtado",
+    "Universidad Andrés Bello", "Universidad Autónoma de Chile",
+    "Universidad Arturo Prat", "Universidad Austral de Chile",
+    "Universidad de La Frontera", "Universidad de Magallanes",
+    "Universidad de Talca", "Universidad Católica del Norte",
+    "Universidad Católica del Maule", "Universidad Católica de Temuco",
+    "Universidad Católica de la Santísima Concepción", "Universidad Bernardo O'Higgins",
+    "Universidad Central de Chile", "Universidad de Antofagasta",
+    "Universidad de Atacama", "Universidad de La Serena",
+    "Universidad del Bío-Bío", "Universidad de Playa Ancha de Ciencias de la Educación",
+    "Universidad de Tarapacá", "Universidad de Viña del Mar",
+    "Universidad Diego Portales", "Universidad Finis Terrae",
+    "Universidad Mayor", "Universidad Metropolitana de Ciencias de la Educación",
+    "Universidad Miguel de Cervantes", "Universidad San Sebastián",
+    "Instituto Profesional AIEP", "Instituto Profesional ARCOS",
+    "Instituto Profesional de Chile", "Instituto Profesional Duoc UC",
+    "Instituto Profesional Escuela de Contadores Auditores de Santiago",
+    "Instituto Profesional Agrario Adolfo Matthei", "Instituto Nacional de Capacitación Profesional (INACAP)",
+    "Instituto Profesional Iplacex", "Instituto Profesional Santo Tomás",
+    "Instituto Profesional Virginio Gómez", "Instituto Profesional CIISA",
+    "Instituto Profesional Galdámez", "Universidad de California",
+    "Universidad de Cuenca", "Universidad de Georgetown",
+    "Universidad Complutense de Madrid", "Universität Basel",
+    "Universidad de Bilbao-España", "Università degli Studi di Milano",
+    "Universidad Real", "Instituto Técnico de Estocolmo",
+    "Universidad Nacional Autónoma de México",
+    "Escuela Nacional de Antropología e Historia de México",
+    "Universidad Internacional de Cataluña, España",
+    "Universidad de Heidelberg", "Universidad Mayor de San Simón",
+    "Universidad Católica Raúl Silva Henríquez",
+    "Escuela de Comunicación Mónica Herrera",
+    "Universidad Contemporánea de Arica",
+    "Instituto Bancario Guillermo Subercaseaux", "Universidad Pedro de Valdivia", "Instituto Vicente Pérez Rosales",
+    "Universidad de Los Lagos", "Instituto Nacional de Capacitación Profesional", "Universidad de La República",
+    "Universidad Gabriela Mistral", "Universidad Mariano Egaña",
+    "Universidad Católica de la Santísima Concepción", "Universidad Bolivariana", "Universidad de Artes, Ciencias y Comunicación (UNIACC)",
+    "Universidad Academia de Humanismos Cristiano", "Instituto Profesional Diego Portales", "Universidad Iberoamericana de Ciencias y Tecnología",
+    "Universidad de Antofagasta", 
+    "Universidad del Pacífico",    # Añadir extranjeras genéricas
+    "Universidad Extranjera"
+]
+
+
+# --- 3. FUNCIÓN AUXILIAR DE MATCHING ---
+def _find_best_uni_match(raw_entry: str, choices: list, reverse_map: dict) -> str:
+    """
+    Toma un string crudo y usa una estrategia HÍBRIDA para encontrar el mejor match canónico.
+    """
+    if not isinstance(raw_entry, str):
+        return "Desconocida"
+    
+    # 1. Extraer la *primera* universidad de la lista
+    primary_entry = raw_entry.split(',')[0].split('(')[0].strip()
+    norm_entry = normalize_string(primary_entry)
+    
+    if norm_entry == "" or norm_entry == "nan":
+         return "Desconocida"
+
+    # 2. JERARQUÍA 1: Buscar en el Mapa Manual (Rápido y Preciso)
+    match = reverse_map.get(norm_entry)
+    if match:
+        return match # ¡Encontrado!
+
+    mejores_candidatos = process.extract(
+    query=norm_entry,
+    choices=choices,
+    scorer=fuzz.WRatio,
+    processor=normalize_string,
+    limit=5
+)
+
+    mejor_nombre = None
+    mejor_score_final = 0
+
+    for candidato_nombre, score_paso1, _ in mejores_candidatos:
+        
+        score_paso2 = fuzz.partial_token_set_ratio(
+            normalize_string(norm_entry),
+            normalize_string(candidato_nombre)
+        )
+        
+        score_final = max(score_paso1, score_paso2)
+        
+        if score_final > mejor_score_final:
+            mejor_score_final = score_final
+            mejor_nombre = candidato_nombre
+    if mejor_score_final >= 90:
+        return mejor_nombre
+    else:
+        return "Otra / Desconocida"
+
+# --- 4. FUNCIÓN PRINCIPAL REFACTORIZADA ---
 def standardize_education(df_in: pd.DataFrame) -> pd.DataFrame:
     """
-    Estandariza las columnas 'universidad' y 'maximo_nivel_educativo'
-    usando fuzzy matching y mapeo simple.
+    (VERSIÓN HÍBRIDA Y OPTIMIZADA)
+    Estandariza 'universidad' usando Mapeo Manual y Mapeo Fuzzy "Una Sola Vez".
     """
     df = df_in.copy()
     
-    # --- Estandarizar Nivel Educativo ---
+    # --- A. Estandarizar Nivel Educativo (sin cambios) ---
     if 'maximo_nivel_educativo' in df.columns:
         logging.info("Estandarizando 'maximo_nivel_educativo'...")
-        # Mapeo simple
         level_map = {
-            "enseñanza básica": "Básica",
-            "enseñanza media": "Media",
-            "educación universitaria": "Universitaria",
-            "magíster": "Magíster",
-            "doctor/a": "Doctorado",
-            "doctorado": "Doctorado"
+            "enseñanza básica": "Básica", "enseñanza media": "Media",
+            "educación universitaria": "Universitaria", "magíster": "Magíster",
+            "doctor/a": "Doctorado", "doctorado": "Doctorado"
         }
         df['educacion_nivel_clean'] = df['maximo_nivel_educativo'].str.lower().map(level_map)
-        # Llenar vacíos (si 'universidad' existe, asumir 'Universitaria')
         df.loc[(df['educacion_nivel_clean'].isna()) & (df['universidad'].notna()), 'educacion_nivel_clean'] = "Universitaria"
 
-    # --- Estandarizar Universidad (con Fuzzy Matching) ---
+    # --- B. Estandarizar Universidad ---
     if 'universidad' in df.columns:
-        logging.info("Estandarizando 'universidad'...")
-        # 1. Crear la lista de 'choices' (opciones canónicas)
-        choices = list(MAPA_UNIVERSIDADES.keys())
+        logging.info("Estandarizando 'universidad' con estrategia 'map-once'...")
         
-        # 2. Crear un mapa de normalización (ej. "u de chile" -> "Universidad de Chile")
+        # 1. Crear el mapa de búsqueda manual (rápido)
         reverse_map = {}
-        for key, values in MAPA_UNIVERSIDADES.items():
+        for key, values in UNI_MAP.items():
             for v in values:
                 reverse_map[v] = key
         
-        # 3. Aplicar
-        def find_uni(uni_str):
-            if not isinstance(uni_str, str):
-                return "Desconocida"
-            
-            norm_str = normalize_string(uni_str)
-            
-            # 3.1. Match Perfecto (con mapa de normalización)
-            if norm_str in reverse_map:
-                return reverse_map[norm_str]
-            
-            # 3.2. Match Difuso (Fuzzy)
-            match, score, _ = process.extractOne(norm_str, choices, scorer=fuzz.token_sort_ratio)
-            
-            if score >= 90:
-                return match
-            else:
-                return "Otra / Desconocida"
+        # 2. Obtener los valores únicos (LA OPTIMIZACIÓN)
+        unique_universities = df['universidad'].unique()
+        logging.info(f"Se encontraron {len(unique_universities)} valores únicos de universidad.")
 
-        # (usar .progress_apply si está en un notebook, pero esto es un módulo)
-        df['universidad_clean'] = df['universidad'].apply(find_uni)
+        # 3. Construir el Mapeo (solo en los únicos)
+        logging.info("Construyendo mapa de traducción (Manual + Fuzzy)...")
+        map_dict = {}
+        for raw_name in tqdm(unique_universities, desc="Creando Mapa Fuzzy"):
+            map_dict[raw_name] = _find_best_uni_match(
+                raw_name, 
+                UNIVERSIDADES_CANONICAS, 
+                reverse_map
+            )
+
+        # 4. Aplicar el mapeo a todas las filas (muy rápido)
+        logging.info("Aplicando mapa a todas las filas...")
+        df['universidad_clean'] = df['universidad'].map(map_dict)
+
+        # 5. Crear 'universidad_tipo'
+        logging.info("Clasificando tipo de universidad...")
+        def get_tipo(uni_clean):
+            if uni_clean in ["Desconocida", "Otra / Desconocida", "Universidad Extranjera"]:
+                return uni_clean
+            if "Instituto" in uni_clean or "INACAP" in uni_clean or "AIEP" in uni_clean or "Duoc" in uni_clean:
+                return "Instituto/Técnico"
+            return "Universidad Chilena"
         
+        df['universidad_tipo'] = df['universidad_clean'].apply(get_tipo)
+        
+    return df
+
+CAREER_MAP_REGEX = {
+    # --- 1. CATEGORÍAS MÁS ESPECÍFICAS (VAN PRIMERO) ---
+    
+    'Geografía': r'geograf[ií]a|geograf(o|a)',
+    'Asistente Social': r'asistente social|trabaj(o|adora) social', # Movido desde Ciencias Sociales
+    'Licenciatura en matemáticas': r'licenciatura en matem[áa]ticas|matem[áa]ticas', # Movido desde Ciencias Sociales
+    'Teología': r'teolog(o|a)|teologia', # Movido desde Ciencias Sociales
+    'Biología Marina': r'biolog(o|a) marino|ciencias del mar|oceanograf[ií]a',
+    'Marketing': r'marketing|comercio internacional|publicidad y marketing',
+    'Ingeniería en Metalurgia': r'ingenier([íi]|)(o|a|) en metalurgia|metalurgista',
+
+    # --- 2. CATEGORÍAS GENERALES AMPLIAS ---
+    
+    'Ingeniería Comercial': r'economia|ingenier([íi]|)(o|a|) comercial|ciencias de la administracion|ciencias economicas|gestion de empresas|administracion de empresas|administracion y direccion de empresas|ingenier(o|a) en administraci[óo]n|direcci[óo]n y gesti[óo]n servicios|contador|auditor|gestion gerencial|administraci[óo]n bancaria y contabilidad',
+    'Ingeniería Civil': r'ingenier([íi]|)(o|a|) civil|(?<!ejecucion\s)ingenier([íi]|)(o|a|) industrial|obras civiles|construccion civil|ingenier[íi]a civil industrial',
+    'Ingeniería (Ejecución/Técnica)': r'ingenier([íi]|)(o|a|) en ejecucion|ejecucion|tecnico|laboratista|geomensura|quimico industrial|electrico|electronica|mecanico|tecnica en quimica',
+    'Derecho': r'derecho|abogad(o|a)|jur[íi]dica|leyes|ciencias jur[íi]dicas',
+    'Salud': r'm[eé]dic(o|a)|cirujan(o|a)|medicina|odontolog|enfermer(o|a)|obstetricia|matr[oó]n|kinesiolog|fonoaudiolog|psicolog[ií]a|psiquiatr[ií]a|enfermer(o|a)|enfermeria',
+    'Educación / Pedagogía': r'profesor(|a)|pedagog[ií]a|educador(a)|educacion|licenciado en educacion|ense[ñn]anza',
+    'Agronomía / Veterinaria': r'agronomo|agronomia|forestal|agricola|veterinaria|pecuaria',
+    
+    # (Llave consolidada y corregida)
+    'Administración Pública': r'administraci[óo]n publica|administrador(|a) p[úu]blic(o|a)|ciencias politicas y administrativas|oficial civil|programas sociales', 
+    
+    'Periodismo / Comunicaciones': r'periodis|comunicaci[oó]n social|comunicador social|relaciones publicas|publicidad',
+    'Arquitectura / Diseño': r'arquitectura|arquitect(o|a)|dise[ñn]o|dise[ñn]ador industrial',
+    'Arte / Actuación': r'arte|actor|actriz|actuacion|teatro|musica|danza|gestion cultural',
+
+    # --- 3. CATEGORÍA "CATCH-ALL" (VA AL FINAL) ---
+    
+    # (Limpiada de los duplicados que ahora están arriba)
+    'Ciencias Sociales': r'soci[óo]log(o|a)|ciencias pol[íi]ticas|sociolog[ií]a|antropolog[ií]a|ciencia politica|cientista politico|historia|filosof[ií]a|letras|literatura|bachillerato en humanidades'
+}
+
+# --- 2. FUNCIÓN DE LIMPIEZA AUXILIAR ---
+def _clean_raw_career(raw_entry: str) -> list:
+    """
+    Toma un string crudo (que puede ser una lista-como-string)
+    y lo convierte en una lista limpia de strings.
+    
+    Input: "['Derecho', 'Magíster en...']" -> Output: ["derecho", "magister en..."]
+    Input: "Psicología, Derecho" -> Output: ["psicologia", "derecho"]
+    """
+    if not isinstance(raw_entry, str):
+        return []
+    
+    # Intentar parsear como lista (ej. "['...']")
+    try:
+        parsed_list = ast.literal_eval(raw_entry)
+        if isinstance(parsed_list, list):
+            return [normalize_string(item) for item in parsed_list]
+    except (ValueError, SyntaxError):
+        # No era una lista-como-string, tratar como string simple
+        pass
+    
+    # Es un string simple, normalizar y separar por comas
+    # ej. "Psicología, Derecho"
+    entries = re.split(r',|;', raw_entry) # Separar por coma o punto y coma
+    return [normalize_string(entry) for entry in entries if entry.strip()]
+
+
+# --- 3. FUNCIÓN DE ESTANDARIZACIÓN (NUEVA) ---
+def standardize_career(df_in: pd.DataFrame) -> pd.DataFrame:
+    """
+    Estandariza la columna 'carrera' usando Mapeo Regex "Una Sola Vez".
+    Crea 'carrera_clean_1' y 'carrera_clean_2' (para multi-carreras).
+    """
+    df = df_in.copy()
+    
+    if 'carrera' not in df.columns:
+        logging.warning("No se encontró la columna 'carrera'. Saltando.")
+        return df
+
+    logging.info("Estandarizando 'carrera' con estrategia 'map-once'...")
+
+    # 1. Obtener valores únicos (LA OPTIMIZACIÓN)
+    unique_careers_raw = df['carrera'].unique()
+    logging.info(f"Se encontraron {len(unique_careers_raw)} valores únicos de carrera.")
+
+    # 2. Construir el Mapeo (solo en los únicos)
+    logging.info("Construyendo mapa de traducción de carreras (Regex)...")
+    map_dict = {}
+
+    for raw_entry in tqdm(unique_careers_raw, desc="Mapeando Carreras"):
+        
+        # 2a. Limpiar el string a una lista (ej. ["psicologia", "derecho"])
+        cleaned_list = _clean_raw_career(raw_entry)
+        
+        # 2b. Buscar matches de regex en esa lista
+        matches = []
+        for term in cleaned_list:
+            if not term:
+                continue
+            
+            found = False
+            for category, regex_pattern in CAREER_MAP_REGEX.items():
+                if re.search(regex_pattern, term):
+                    if category not in matches: # Evitar duplicados
+                        matches.append(category)
+                    found = True
+                    break # Asumir que un término solo pertenece a una categoría
+        
+        # 2c. Asignar al mapa
+        if not matches:
+            map_dict[raw_entry] = ["Desconocida"]
+        else:
+            map_dict[raw_entry] = matches
+    
+    # 3. Aplicar el mapeo a todas las filas (muy rápido)
+    logging.info("Aplicando mapa a todas las filas...")
+    # Esto crea una columna donde cada celda es una LISTA de carreras (ej. ['Salud', 'Derecho'])
+    df['carrera_clean_list'] = df['carrera'].map(map_dict)
+
+    # 4. (Ingeniería de Features) Dividir en columnas separadas
+    # Esto es mucho más útil para el modelamiento
+    df['carrera_clean_1'] = df['carrera_clean_list'].apply(lambda x: x[0] if isinstance(x, list) and len(x) > 0 else "Desconocida")
+    df['carrera_clean_2'] = df['carrera_clean_list'].apply(lambda x: x[1] if isinstance(x, list) and len(x) > 1 else None)
+
     return df
 
 def standardize_civil_status(status_series: pd.Series) -> pd.Series:
@@ -247,29 +528,51 @@ def standardize_location(loc_series: pd.Series) -> pd.DataFrame:
     # 9. Retornar solo las nuevas columnas
     return df[['ciudad_nac', 'pais_nac']]
 
-# --- 3. FUNCIÓN DE DEDUPLICACIÓN ---
+def create_age_features(df: pd.DataFrame, 
+                        start_date_col: str, 
+                        birth_date_col: str) -> pd.DataFrame:
+    """
+    Calcula la 'edad' y el 'rango_etario' de un diputado al
+    inicio de un período.
 
-def deduplicate_deputies(df_full: pd.DataFrame) -> pd.DataFrame:
+    Args:
+        df (pd.DataFrame): El DataFrame que contiene las fechas.
+        start_date_col (str): Nombre de la col. con la fecha de inicio del período.
+        birth_date_col (str): Nombre de la col. con la fecha de nacimiento limpia.
+
+    Returns:
+        pd.DataFrame: El DataFrame original con 2 nuevas columnas: 'edad' y 'rango_etario'.
     """
-    Toma el DataFrame consolidado (con duplicados) y crea un
-    registro maestro único por diputado.
-    """
-    # Usaremos el 'Diputado.Id' como la clave única
-    if 'Diputado.Id' not in df_full.columns:
-        logging.error("No se encuentra 'Diputado.Id', no se puede deduplicar.")
-        return df_full
-        
-    logging.info(f"Deduplicando... Filas antes: {len(df_full)}")
+    logging.info(f"Creando features 'edad' y 'rango_etario'...")
     
-    # Estrategia: Ordenar por 'match_score' (calidad de la bio)
-    # y 'fecha_ingreso' (más reciente), y luego tomar el MEJOR registro.
-    df_sorted = df_full.sort_values(
-        by=['match_score', 'fecha_ingreso'], 
-        ascending=[False, False]
+    # 1. Asegurar que sean datetime
+    df[start_date_col] = pd.to_datetime(df[start_date_col], errors='coerce')
+    df[birth_date_col] = pd.to_datetime(df[birth_date_col], errors='coerce')
+
+    # 2. Calcular la edad (en años)
+    # (Ignorar advertencias si 'start_date_col' es NaT)
+    with np.errstate(invalid='ignore'):
+        df['edad'] = (
+            df[start_date_col] - df[birth_date_col]
+        ) / np.timedelta64(1, 'Y') # Convertir a años
+
+    # Redondear y convertir a entero (Int64 maneja NaNs)
+    df['edad'] = df['edad'].astype(float).round().astype('Int64')
+
+    # 3. Crear el 'rango_etario'
+    # Definir los "cortes" (bins)
+    bins = [18, 29, 39, 49, 59, 69, 110] # 18-29, 30-39, etc.
+    labels = ['18-29', '30-39', '40-49', '50-59', '60-69', '70+']
+
+    df['rango_etario'] = pd.cut(
+        df['edad'],
+        bins=bins,
+        labels=labels,
+        right=True,
+        include_lowest=True
     )
     
-    # 'keep='first'' se queda con el mejor registro (el primero después de ordenar)
-    df_master = df_sorted.drop_duplicates(subset=['Diputado.Id'], keep='first')
+    # Reemplazar 'NaN' en la categoría con 'Desconocido'
+    df['rango_etario'] = df['rango_etario'].cat.add_categories('Desconocido').fillna('Desconocido')
     
-    logging.info(f"Filas después de deduplicar: {len(df_master)}")
-    return df_master
+    return df
