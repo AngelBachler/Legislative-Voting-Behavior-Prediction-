@@ -1,11 +1,13 @@
-/data/01_raw/
-/data/02_processed/
-/data/03_final/
+/data/01_raw/*
+/data/02_processed/*
+/data/03_final/*
 
 # Excepción: Mantener las carpetas vacías (buena práctica)
 # (Si quieres que Git sepa que las carpetas existen pero ignore su contenido)
 !/data/01_raw/.gitkeep
 !/data/02_processed/.gitkeep
+!/data/02_processed/*.parquet
+!/data/03_final/*.parquet
 !/data/03_final/.gitkeep
 
 # Ignorar otros archivos de entorno
