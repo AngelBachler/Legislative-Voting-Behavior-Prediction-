@@ -574,3 +574,120 @@ def create_age_features(df: pd.DataFrame,
     df['rango_etario'] = df['rango_etario'].cat.add_categories('Desconocido').fillna('Desconocido')
     
     return df
+
+VOTE_MAP = {
+    'aprueba': 1.0,
+    'rechaza': 0.0,
+    'abstencion': 0.5,
+    'abstiene': 0.5,
+    'pareo': np.nan,    # El pareo no es un voto, lo marcamos como Nulo
+    'no vota': np.nan,  # 'No vota' tampoco
+    'articulo 5': 0.5 # (Asumimos Abstención, puede cambiarlo)
+}
+
+VOTE_MAP = {
+    'afirmativo': 1.0,
+    'en contra': 0.0,
+    'abstencion': 0.5,
+    'abstiene': 0.5,
+    'pareo': np.nan,    
+    'no vota': np.nan,  
+    'articulo 5': 0.5 
+}
+
+# --- REEMPLAZAR LA VERSIÓN ANTIGUA CON ESTA ---
+def process_votaciones_chunk(df_raw: pd.DataFrame, periodo_nombre: str) -> pd.DataFrame:
+    """
+    (VERSIÓN CORREGIDA)
+    Limpia, mapea, y selecciona columnas de un chunk (un 'detalle.csv')
+    usando los nombres de columna reales.
+    """
+    df = df_raw.copy()
+    
+    # --- (NUEVO) PASO 1: FILTRAR SOLO Proyectos de Ley ---
+    logging.info(f"Filtrando 'Proyectos de Ley' para {periodo_nombre}...")
+    
+    tipo_col_raw = None
+    if 'Tipo._value_1' in df.columns:
+        tipo_col_raw = df['Tipo._value_1']
+    
+    if tipo_col_raw is not None:
+        # Convertir a string para estar seguros
+        tipo_votacion_series = tipo_col_raw.astype(str).str.lower()
+        
+        # Filtro: quedarse solo con filas que contengan 'proyecto de ley'
+        keep_mask = tipo_votacion_series.str.contains('proyecto de ley', na=False)
+        df = df[keep_mask]
+        
+        if df.empty:
+            logging.info(f"No se encontraron votaciones de 'Proyectos de Ley' en el chunk {periodo_nombre}.")
+            return pd.DataFrame() # Retornar vacío
+        
+        logging.info(f"Se encontraron {len(df)} votaciones de 'Proyectos de Ley'.")
+    else:
+        logging.warning(f"No se encontraron columnas 'Tipo' en {periodo_nombre}. No se pudo filtrar.")
+    
+    # 1. Map Votos (Usando las columnas correctas)
+    #    Vamos a consolidar 'OpcionVoto.Valor' y 'OpcionVoto._value_1'
+    if 'OpcionVoto.Valor' not in df.columns and 'OpcionVoto._value_1' not in df.columns:
+        logging.warning(f"No se encontró 'OpcionVoto.Valor' o '_value_1' en {periodo_nombre}.")
+        return pd.DataFrame()
+
+    # Priorizar la columna de texto 'Valor' si existe
+    if 'OpcionVoto.Valor' in df.columns:
+        df['voto_valor'] = df['OpcionVoto.Valor']
+
+    # 2. Extract Boletin ID (Crucial para NLI)
+    #    (Usando la columna 'Descripcion')
+    if 'Descripcion' in df.columns:
+        df['boletin_id'] = df['Descripcion'].astype(str).str.extract(
+            r"Bolet[ií]n\s*N[°º]?\s*(\d+-\d+)"
+        )[0]
+    else:
+        df['boletin_id'] = np.nan
+
+    # 3. Select and Rename (Usando los nombres de columna reales)
+    cols_to_keep = {
+        # Columna Cruda     -> Columna Limpia
+        'Id':               'votacion_id',
+        'Fecha':            'fecha_votacion',
+        'TotalSi':        'total_si',
+        'TotalNo':        'total_no',
+        'TotalAbstencion':'total_abstenciones',
+        'TotalDispensado':'total_dispensado',
+        'Quorum._value_1': 'quorum',
+        'Diputado.Id':      'diputado_id',
+        'voto_valor':       'voto_valor',     # Creada en Paso 1
+        'boletin_id':       'boletin_id'     # Creada en Paso 2
+    }
+    
+    # (Verificar si faltan columnas en este chunk)
+    final_cols = {}
+    for col_raw, col_clean in cols_to_keep.items():
+        if col_raw in df.columns:
+            final_cols[col_raw] = col_clean
+        elif col_raw in df.index: # Para 'voto_valor' y 'boletin_id'
+             final_cols[col_raw] = col_clean
+        else:
+            logging.warning(f"Col. faltante '{col_raw}' en {periodo_nombre}. Se rellenará con NaT/NaN.")
+            df[col_raw] = np.nan # Añadirla como NaN para que no falle el rename
+            final_cols[col_raw] = col_clean
+            
+    # Filtrar solo las columnas que existen
+    existing_cols_raw = [col for col in final_cols.keys() if col in df.columns]
+    df_clean = df[existing_cols_raw]
+    df_clean = df_clean.rename(columns=final_cols)
+    
+    # 4. Convert types
+    df_clean['fecha_votacion'] = pd.to_datetime(df_clean['fecha_votacion'], errors='coerce')
+    df_clean['diputado_id'] = pd.to_numeric(df_clean['diputado_id'], errors='coerce').astype('Int64')
+    df_clean['votacion_id'] = pd.to_numeric(df_clean['votacion_id'], errors='coerce').astype('Int64')
+    df_clean['boletin_id'] = df_clean['boletin_id'].astype(str).replace('nan', np.nan) 
+    
+    # 5. Add period key
+    df_clean['periodo'] = periodo_nombre
+    
+    # 6. Drop rows with no vote (e.g., Pareo o Nulos) o llaves nulas
+    df_clean = df_clean.dropna(subset=['voto_valor', 'diputado_id', 'votacion_id'])
+    
+    return df_clean
