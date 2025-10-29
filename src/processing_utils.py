@@ -1,5 +1,3 @@
-# --- Contenido para: src/processing_utils.py ---
-
 import pandas as pd
 import logging
 from pathlib import Path
@@ -550,17 +548,17 @@ def create_age_features(df: pd.DataFrame,
     df[birth_date_col] = pd.to_datetime(df[birth_date_col], errors='coerce')
 
     # 2. Calcular la edad (en años)
-    # (Ignorar advertencias si 'start_date_col' es NaT)
-    with np.errstate(invalid='ignore'):
-        df['edad'] = (
-            df[start_date_col] - df[birth_date_col]
-        ) / np.timedelta64(1, 'Y') # Convertir a años
+    time_diff = df[start_date_col] - df[birth_date_col]
+    
+    seconds_in_year = 365.25 * 24 * 60 * 60
+    
+    with np.errstate(invalid='ignore'): # Ignorar si hay NaT
+        df['edad'] = time_diff.dt.total_seconds() / seconds_in_year
 
     # Redondear y convertir a entero (Int64 maneja NaNs)
     df['edad'] = df['edad'].astype(float).round().astype('Int64')
 
     # 3. Crear el 'rango_etario'
-    # Definir los "cortes" (bins)
     bins = [18, 29, 39, 49, 59, 69, 110] # 18-29, 30-39, etc.
     labels = ['18-29', '30-39', '40-49', '50-59', '60-69', '70+']
 

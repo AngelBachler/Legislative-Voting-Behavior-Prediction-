@@ -103,5 +103,5 @@ def get_ollama_client(host='http://127.0.0.1:11434'):
     except Exception as e:
         # 3. Manejar el error si Ollama no está corriendo
         logging.error(f"ERROR: No se pudo conectar con el servidor de Ollama en {host}.")
-        logging.error(f"   Asegúrese de que Ollama esté en ejecución. Detalle: {e}")
+        logging.error(f"Asegúrese de que Ollama esté en ejecución. Detalle: {e}")
         return None
