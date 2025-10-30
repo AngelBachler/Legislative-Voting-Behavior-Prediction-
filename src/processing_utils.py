@@ -6,6 +6,8 @@ import numpy as np
 import re
 import ast
 from tqdm import tqdm
+from ollama import Client
+import json
 
 # Importar nuestra función de normalización de texto
 try:
@@ -691,3 +693,138 @@ def process_votaciones_chunk(df_raw: pd.DataFrame, periodo_nombre: str) -> pd.Da
     df_clean = df_clean.dropna(subset=['voto_valor', 'diputado_id', 'votacion_id'])
     
     return df_clean
+
+
+def load_all_bulletin_files(data_dir_raw: Path) -> pd.DataFrame:
+    """
+    Encuentra todos los 'boletines.csv' en las subcarpetas de 01_raw,
+    los carga, los concatena y DEDUPLICA por 'boletin_id'.
+    """
+    logging.info("Buscando archivos 'boletines.csv'...")
+    
+    # Usar glob para encontrar todos los archivos
+    bulletin_files = list(data_dir_raw.glob('*/boletines.csv'))
+    
+    if not bulletin_files:
+        logging.error(f"No se encontraron archivos 'boletines.csv' en {data_dir_raw}")
+        return pd.DataFrame()
+
+    logging.info(f"Encontrados {len(bulletin_files)} archivos. Cargando...")
+    
+    lista_df = []
+    for f in bulletin_files:
+        try:
+            df = pd.read_csv(f, low_memory=False)
+            lista_df.append(df)
+        except Exception as e:
+            logging.error(f"Error al cargar el archivo {f}: {e}")
+            
+    if not lista_df:
+        logging.error("No se pudo cargar ningún DataFrame de boletines.")
+        return pd.DataFrame()
+        
+    df_full = pd.concat(lista_df, ignore_index=True)
+    logging.info(f"DataFrame consolidado creado con {len(df_full)} filas.")
+    
+    # --- (PASO CRÍTICO) Deduplicar ---
+    # Un mismo boletín puede haber sido extraído en múltiples períodos.
+    # Nos quedamos con la primera aparición.
+    logging.info("Deduplicando por 'boletin_id'...")
+    df_clean = df_full.drop_duplicates(subset=['boletin_id'], keep='first')
+    logging.info(f"DataFrame deduplicado tiene {len(df_clean)} boletines únicos.")
+    
+    return df_clean
+
+MATERIAS_SYSTEM_PROMPT = """
+Eres un analista experto del Congreso Nacional de Chile. Tu tarea es clasificar una lista de materias legislativas en una o más categorías temáticas generales.
+
+**Reglas Estrictas:**
+1.  **JSON Únicamente:** Tu respuesta debe ser **SOLAMENTE** un objeto JSON válido, sin texto introductorio (como "Aquí está el JSON:").
+2.  **Multi-Etiqueta:** Un proyecto puede pertenecer a múltiples ámbitos. Asigna *todos* los que apliquen. (Ej. "REAJUSTE DE REMUNERACIONES" es ["Trabajo y Previsión", "Economía y Hacienda"]).
+3.  **Categorías Válidas:** Usa **SOLAMENTE** las siguientes 13 categorías:
+    * Educación
+    * Salud
+    * Trabajo y Previsión
+    * Economía y Hacienda
+    * Seguridad y Justicia
+    * Medio Ambiente y Energía
+    * Vivienda y Urbanismo
+    * Gobierno y Política
+    * Relaciones Exteriores
+    * Cultura y Deporte
+    * Transporte y Telecomunicaciones
+    * Derechos Humanos y Género
+    * no cumple
+4.  **"no cumple":** Usa `["no cumple"]` *solo si* ninguna otra categoría aplica (ej. "HOMENAJE", "ACUERDO INTERNACIONAL").
+5.  **Ignora Ruido:** Ignora términos genéricos como "BOLETÍN", "PROYECTO DE LEY", "MODIFICA".
+
+**Formato JSON Requerido:**
+{
+  "materias_originales": "<texto exacto recibido>",
+  "ambitos_detectados": ["<ámbito1>", "<ámbito2>", ...]
+}
+"""
+
+def extraer_materia_llm(client: Client, materias_str: str, model_name: str) -> dict | None:
+
+    # --- 1. Validación de Entradas (Guard Clauses) ---
+    if not client:
+        logging.warning("extraer_materia_llm: Cliente Ollama no es válido (None).")
+        return None
+        
+    if not isinstance(materias_str, str) or len(materias_str) < 5:
+        # No molestar al LLM si el texto es muy corto o inválido
+        logging.info("extraer_materia_llm: Texto de materias omitido (demasiado corto o inválido).")
+        return None
+
+    # --- 2. Ejecución y Parseo (Bloque Try/Except) ---
+    try:
+        # 2.1. Llamar al LLM
+        response = client.chat(
+            model=model_name,
+            messages=[
+                {'role': 'system', 'content': MATERIAS_SYSTEM_PROMPT},
+                {'role': 'user', 'content': materias_str}
+            ],
+            options={'temperature': 0.0}, # Queremos respuestas fácticas
+            format="json" # (Opcional) Forzar formato JSON si el modelo lo soporta
+        )
+        
+        # 2.2. Obtener la respuesta (string que *contiene* JSON)
+        json_string = response['message']['content'].strip()
+        
+        # 2.3. Limpiar el JSON (Remover markdown y texto extra)
+        # (Llama3 a veces ignora 'format="json"' y añade markdown)
+        
+        # Quitar ```json y ```
+        json_string = re.sub(r'^```json\s*', '', json_string, flags=re.MULTILINE)
+        json_string = re.sub(r'```\s*$', '', json_string, flags=re.MULTILINE)
+        
+        # Buscar el inicio '{' y el final '}'
+        json_start = json_string.find('{')
+        json_end = json_string.rfind('}')
+        
+        if json_start == -1 or json_end == -1:
+            logging.warning(f"Respuesta del LLM no contenía JSON. Respuesta: {json_string[:200]}")
+            return None
+
+        # Recortar al JSON válido
+        json_string = json_string[json_start:json_end+1]
+        
+        # 2.4. Parsear el string a un diccionario Python
+        data_dict = json.loads(json_string)
+
+        # 2.5. Validar el schema de salida
+        if 'ambitos_detectados' not in data_dict:
+            logging.warning(f"JSON del LLM no contenía 'ambitos_detectados'. JSON: {json_string}")
+            return None
+            
+        return data_dict
+
+    except json.JSONDecodeError as e:
+        logging.error(f"Error al decodificar JSON del LLM. String: {json_string[:200]}... Error: {e}")
+        return None
+    except Exception as e:
+        # Manejar errores (ej. Ollama desconectado, etc.)
+        logging.error(f"Error en llamada a extraer_materia_llm: {e}", exc_info=True)
+        return None
