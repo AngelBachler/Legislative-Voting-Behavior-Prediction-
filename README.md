@@ -28,7 +28,7 @@ Which institutional, partisan, and individual features best predict parliamentar
 
 ## Data Sources
 
-The data is obtained from open data published, including:
+The data is obtained from publicly available open data sources, including:
 
 - Open voting records and legislative metadata  
 - Parliamentary transparency and open data portals  
@@ -82,7 +82,7 @@ The project follows a modular and extensible pipeline architecture:
 ---
 ## Trained Models
 
-To extract parliamentary stances from plenary session transcripts, we initially used the Spanish BERT model **dccuchile/bert-base-spanish-wwm-uncased**, available on Hugging Face..
+To extract parliamentary stances from plenary session transcripts, we initially used the Spanish BERT model **dccuchile/bert-base-spanish-wwm-uncased**, available on Hugging Face.
 
 Although this model provides strong performance on general Spanish-language tasks, it was pre-trained primarily on informal textual sources (e.g., tweets). As a result, it struggled to correctly infer negative or oppositional stances expressed in the formal and diplomatic language used in parliamentary debates.
 
@@ -92,12 +92,14 @@ To address this limitation, we fine-tuned the model on a domain-specific corpus 
 
 <img width="678" height="489" alt="image" src="https://github.com/user-attachments/assets/add9efa7-d49c-4231-bc55-8624fccadb54" />
 
+Due to size and reproducibility considerations, fine-tuned model artifacts are not included in the repository. All results can be reproduced using the training pipeline provided.
+
 --- 
 ## Results
 
 The models achieve predictive performance above baseline levels, indicating that historical voting behavior and party affiliation provide strong explanatory signals for parliamentary voting decisions.
 
-Overall, the models are capable of predicting roll-call votes with strong and stable performance across different legislative periods, as shown in the following figure.
+Overall, the models demonstrate strong and stable performance in predicting roll-call votes across different legislative periods, as shown in the following figure.
 
 <img width="673" height="417" alt="image" src="https://github.com/user-attachments/assets/304b8b87-8f8a-4ed9-8328-e387b0f58642" />
 
