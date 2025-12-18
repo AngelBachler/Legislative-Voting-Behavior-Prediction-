@@ -87,6 +87,9 @@ The models achieve predictive performance above baseline levels, indicating that
 
 Detailed results, evaluation metrics, and visualizations are available in the notebooks included in this repository.
 
+<img width="673" height="417" alt="image" src="https://github.com/user-attachments/assets/304b8b87-8f8a-4ed9-8328-e387b0f58642" />
+
+
 ---
 
 ## Limitations
@@ -107,3 +110,5 @@ Detailed results, evaluation metrics, and visualizations are available in the no
 ---
 
 ## Repository Structure
+
+
