@@ -80,9 +80,19 @@ The project follows a modular and extensible pipeline architecture:
 - Preference for interpretable models over black-box performance.
 
 ---
+## Trained Models
 
-## Results
+To extract parliamentary stances from plenary session transcripts, we initially used the Spanish BERT model **dccuchile/bert-base-spanish-wwm-uncased**, available on Hugging Face..
 
+Although this model provides strong performance on general Spanish-language tasks, it was pre-trained primarily on informal textual sources (e.g., tweets). As a result, it struggled to correctly infer negative or oppositional stances expressed in the formal and diplomatic language used in parliamentary debates.
+
+To address this limitation, we fine-tuned the model on a domain-specific corpus derived from parliamentary dialogue annotations. This fine-tuning significantly improved stance classification performance, particularly for negative and neutral classes, as shown in the figures below.
+
+<img width="748" height="440" alt="image" src="https://github.com/user-attachments/assets/2c960bf5-0a43-41bf-88d7-8b3b752ccabd" />
+
+<img width="678" height="489" alt="image" src="https://github.com/user-attachments/assets/add9efa7-d49c-4231-bc55-8624fccadb54" />
+
+--- 
 ## Results
 
 The models achieve predictive performance above baseline levels, indicating that historical voting behavior and party affiliation provide strong explanatory signals for parliamentary voting decisions.
