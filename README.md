@@ -83,12 +83,25 @@ The project follows a modular and extensible pipeline architecture:
 
 ## Results
 
+## Results
+
 The models achieve predictive performance above baseline levels, indicating that historical voting behavior and party affiliation provide strong explanatory signals for parliamentary voting decisions.
 
-Detailed results, evaluation metrics, and visualizations are available in the notebooks included in this repository.
+Overall, the models are capable of predicting roll-call votes with strong and stable performance across different legislative periods, as shown in the following figure.
 
 <img width="673" height="417" alt="image" src="https://github.com/user-attachments/assets/304b8b87-8f8a-4ed9-8328-e387b0f58642" />
 
+The second figure presents the performance of an XGBoost model across different bill topics (Security, Pensions, Education, and Health).
+
+<img width="637" height="451" alt="image" src="https://github.com/user-attachments/assets/f0045c56-3d4f-408f-9193-4a1f591fa637" />
+
+Interpretability analysis using SHAP values reveals that the relevance of features varies across policy domains. For instance, stance-related features play a more significant role in topics such as Pensions and Security than in areas like Health.
+
+<img width="957" height="520" alt="image" src="https://github.com/user-attachments/assets/1a042751-3b91-4b58-a496-9b34ba8634e7" />
+
+<img width="438" height="531" alt="image" src="https://github.com/user-attachments/assets/07d39b26-b6e3-440f-92e7-b02fc5a8776c" />
+
+This suggests that issue salience and public opinion may differentially shape voting behavior depending on the policy domain, an aspect that warrants further investigation.
 
 ---
 
