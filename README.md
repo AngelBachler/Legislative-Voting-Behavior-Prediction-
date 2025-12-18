@@ -28,7 +28,7 @@ Which institutional, partisan, and individual features best predict parliamentar
 
 ## Data Sources
 
-The data is obtained from open data published by the :contentReference[oaicite:0]{index=0}, including:
+The data is obtained from open data published, including:
 
 - Open voting records and legislative metadata  
 - Parliamentary transparency and open data portals  
