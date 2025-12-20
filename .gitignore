@@ -1,6 +1,8 @@
 /data/01_raw/*
 /data/02_processed/*
 /data/03_final/*
+/models/*
+/notebooks/checkpoints/*
 
 # Excepción: Mantener las carpetas vacías (buena práctica)
 # (Si quieres que Git sepa que las carpetas existen pero ignore su contenido)
