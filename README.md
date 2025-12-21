@@ -167,8 +167,5 @@ This suggests that issue salience and public opinion may differentially shape vo
 - Deploy the pipeline as an automated and periodically updated system.
 - Extend the framework to comparative legislative settings.
 
----
-
-## Repository Structure
 
 
