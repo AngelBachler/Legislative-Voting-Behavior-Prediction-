@@ -1,8 +1,34 @@
 # Legislative Voting Behavior Prediction (Chile)
 
-This project develops an end-to-end data pipeline to extract, process, and model open legislative voting data from the Chilean Congress, with the goal of predicting parliamentary voting behavior.
+This project implements a full end-to-end data science pipeline to predict legislative voting behavior using real-world parliamentary data.
 
-The repository was developed as a final degree project in Data Science Engineering and emphasizes reproducibility, interpretability, and structured data workflows.
+The work combines:
+- Designing and implementing a reproducible data pipeline from raw open data
+- Cleaning, normalizing, and integrating heterogeneous legislative datasets
+- Engineering predictive features at legislator, bill, and vote levels
+- Applying NLP techniques to extract parliamentary stances from plenary transcripts
+- Fine-tuning a Chilean Spanish BERT model for domain-specific stance classification
+- Training and evaluating supervised classification models (including XGBoost and CatBoost)
+- Interpreting model outputs using SHAP values
+- Communicating results through visualizations and an academic presentation in English
+
+The project demonstrates applied skills in data engineering, machine learning, NLP, and analytical reasoning using real institutional data.
+
+---
+
+## Tech Stack
+
+- Programming: Python
+- Data Processing: Pandas, NumPy
+- Machine Learning: Scikit-learn, XGBoost, CatBoost
+- NLP: Hugging Face Transformers, BERTopic, BERT fine-tuning, LLMs
+- Model Interpretability: SHAP
+- Data Visualization: Matplotlib, Seaborn
+- Version Control: Git
+
+## Academic context
+This project was developed as part of my undergraduate degree in Data Science Engineering at Pontificia Universidad Católica de Chile 
+and concluded with an academic presentation delivered in English.
 
 ---
 
@@ -10,7 +36,8 @@ The repository was developed as a final degree project in Data Science Engineeri
 
 Understanding and predicting legislative voting behavior is a relevant problem in political science and applied data science. Parliamentary votes reflect ideological alignment, party discipline, and institutional dynamics.
 
-The goal of this project is to enhance transparency for citizens by developing models capable of predicting roll-call votes of Chilean parliamentarians. We argue that identifying the features that drive voting behavior can strengthen democratic accountability and citizen oversight of legislative processes.
+The goal of this project is to enhance transparency for citizens by developing models capable of predicting roll-call votes of Chilean parliamentarians. Identifying the features that drive voting behavior can help improve democratic transparency 
+by enabling citizen oversight of legislative decision-making.
 
 The objectives of this project are to:
 - Build a reproducible pipeline that collects and processes open voting data from the Chilean Congress.
@@ -95,6 +122,14 @@ To address this limitation, we fine-tuned the model on a domain-specific corpus 
 Due to size and reproducibility considerations, fine-tuned model artifacts are not included in the repository. All results can be reproduced using the training pipeline provided.
 
 --- 
+
+## Key Outcomes
+
+- Developed a scalable and reproducible pipeline for legislative data analysis
+- Achieved stable predictive performance above baseline across multiple legislative periods
+- Identified domain-dependent drivers of voting behavior using SHAP interpretability
+
+---
 ## Results
 
 The models achieve predictive performance above baseline levels, indicating that historical voting behavior and party affiliation provide strong explanatory signals for parliamentary voting decisions.
